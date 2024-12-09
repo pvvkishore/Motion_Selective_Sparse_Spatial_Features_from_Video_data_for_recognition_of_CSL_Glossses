@@ -1,0 +1,52 @@
+import torch
+import torch.nn as nn
+
+# CTC Loss function
+ctc_loss = nn.CTCLoss(blank=0, reduction='mean', zero_infinity=True)
+
+logits = torch.randn(50, 1, len(label_encoder.classes_), requires_grad=True)  # (T=50, batch=1, classes=num_classes)
+logits = logits.log_softmax(2) 
+
+# Predicted and target sequences encoded earlier
+encoded_words = torch.tensor(encoded_words, dtype=torch.long).unsqueeze(0)  # shape (1, sequence_length)
+encoded_targets = torch.tensor(encoded_targets, dtype=torch.long)  # shape (total target words)
+
+# Input lengths (how many timesteps for each sample, e.g. 50 timesteps)
+input_lengths = torch.full(size=(1,), fill_value=logits.size(0), dtype=torch.long)  # (batch_size,)
+
+# Target lengths (how many target words per sentence)
+target_lengths = torch.tensor([len(target_words)], dtype=torch.long)  # length of the target sentence
+
+# Compute the CTC loss
+loss = ctc_loss(logits, encoded_targets, input_lengths, target_lengths)
+
+# Backpropagation to update model weights (if you're training)
+loss.backward()
+
+print(f"CTC Loss: {loss.item()}")
+
+import numpy as np
+from sklearn.preprocessing import LabelEncoder
+
+# Assuming you have a LabelEncoder or a mapping to decode the words
+labels = [Replace with your actual words]
+
+# Add any missing classes 
+additional_labels = [f"label_{i}" for i in range(51, 98)]  
+
+
+# Assume label_encoder was previously fitted with classes 0-50
+# Now we include the missing class (62 in this case)
+all_labels = list(label_encoder.classes_)   
+# Refit the LabelEncoder with the updated classes list
+label_encoder.fit(all_labels)
+
+# Now try to decode the encoded predictions
+encoded_words = np.array([21, 45, 70, 96])  # Example indices to decode
+words = label_encoder.inverse_transform(encoded_words)
+
+# Convert to a sentence
+predicted_sentence = ' '.join(words)
+
+# Print the predicted sentence
+print(f"Predicted sentence: {predicted_sentence}")

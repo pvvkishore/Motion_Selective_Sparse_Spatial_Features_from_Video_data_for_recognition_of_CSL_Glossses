@@ -1,0 +1,129 @@
+import os
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torchvision.transforms as transforms
+from torchvision.models import resnet50
+from torch.utils.data import Dataset, DataLoader
+from PIL import Image
+import numpy as np
+
+# Paths
+frames_path = "frames_path"  # Path to video frame folders
+embedding_path = "path to bert_embeddings"  # Path to BERT embeddings
+output_features_path = "path to resnet_features"  # Path to save extracted features
+os.makedirs(output_features_path, exist_ok=True)
+
+# Hyperparameters
+BATCH_SIZE = 8
+EPOCHS = 10
+LEARNING_RATE = 1e-4
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# Dataset Class
+class FrameDataset(Dataset):
+    def __init__(self, frames_path, embedding_path, transform=None):
+        self.frames_path = frames_path
+        self.embedding_path = embedding_path
+        self.transform = transform
+        self.folders = sorted(os.listdir(frames_path))  # Folders named 1, 2, ..., 50
+
+    def __len__(self):
+        return len(self.folders)
+
+    def __getitem__(self, idx):
+        folder = self.folders[idx]
+        folder_path = os.path.join(self.frames_path, folder)
+        embedding_file = os.path.join(self.embedding_path, f"{folder}.npy")
+        embedding = np.load(embedding_file).astype(np.float32)  # Target embeddings
+
+        # Load all frames in the folder and apply transformations
+        frames = []
+        for frame_name in sorted(os.listdir(folder_path)):
+            frame_path = os.path.join(folder_path, frame_name)
+            frame = Image.open(frame_path).convert("RGB")
+            if self.transform:
+                frame = self.transform(frame)
+            frames.append(frame)
+
+        frames = torch.stack(frames)  # Shape: (num_frames, 3, H, W)
+        return frames, torch.tensor(embedding)  # Input frames and target embedding
+
+
+# Image Transformations
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+])
+
+# Load Dataset
+dataset = FrameDataset(frames_path, embedding_path, transform=transform)
+dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
+
+# Define ResNet-50 Model
+class ResNetEmbedding(nn.Module):
+    def __init__(self, output_dim):
+        super(ResNetEmbedding, self).__init__()
+        self.resnet = resnet50(pretrained=False)  # No pretrained weights
+        self.resnet.fc = nn.Linear(self.resnet.fc.in_features, output_dim)  # Custom output layer
+
+    def forward(self, x):
+        return self.resnet(x)
+
+# Initialize Model
+embedding_dim = 768  # Dimension of BERT embeddings
+model = ResNetEmbedding(output_dim=embedding_dim).to(device)
+criterion = nn.MSELoss()  # Mean Squared Error for regression task
+optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
+
+# Training Loop
+print("Starting training...")
+for epoch in range(EPOCHS):
+    model.train()
+    total_loss = 0
+    for frames, targets in dataloader:
+        # Flatten frames and process them as individual images
+        batch_size, num_frames, _, _, _ = frames.shape
+        frames = frames.view(batch_size * num_frames, *frames.shape[2:])
+        targets = targets.repeat_interleave(num_frames, dim=0).to(device)  # Repeat targets for all frames
+
+        frames = frames.to(device)
+        optimizer.zero_grad()
+
+        # Forward pass
+        outputs = model(frames)
+        loss = criterion(outputs, targets)
+        loss.backward()
+        optimizer.step()
+
+        total_loss += loss.item()
+
+    print(f"Epoch {epoch + 1}/{EPOCHS}, Loss: {total_loss / len(dataloader):.4f}")
+
+print("Training completed.")
+
+# Feature Extraction and Saving
+print("Extracting features...")
+model.eval()
+with torch.no_grad():
+    for folder_id in sorted(os.listdir(frames_path)):
+        folder_path = os.path.join(frames_path, folder_id)
+        output_folder = os.path.join(output_features_path, folder_id)
+        os.makedirs(output_folder, exist_ok=True)
+
+        for frame_name in sorted(os.listdir(folder_path)):
+            frame_path = os.path.join(folder_path, frame_name)
+            frame = Image.open(frame_path).convert("RGB")
+            input_tensor = transform(frame).unsqueeze(0).to(device)
+
+            # Extract features
+            features = model.resnet(input_tensor).squeeze().cpu().numpy()
+
+            # Save features
+            output_file = os.path.join(output_folder, f"{os.path.splitext(frame_name)[0]}.npy")
+            np.save(output_file, features)
+
+        print(f"Processed folder {folder_id}")
+
+print("Feature extraction completed.")

@@ -1,0 +1,87 @@
+import os
+import numpy as np
+import torch
+import torch.nn as nn
+from sklearn.preprocessing import StandardScaler
+
+# Define the GRU model
+class GRUModel(nn.Module):
+    def __init__(self, input_size, hidden_size, num_layers):
+        super(GRUModel, self).__init__()
+        self.gru = nn.GRU(input_size, hidden_size, num_layers, batch_first=True)
+        self.fc = nn.Linear(hidden_size, 1)  # Fully connected layer to get probabilities for each time step
+
+    def forward(self, x):
+        # x shape: (batch_size, sequence_length, input_size)
+        gru_out, _ = self.gru(x)  # Shape: (batch_size, sequence_length, hidden_size)
+        probs = torch.sigmoid(self.fc(gru_out))  # Get probabilities for each frame
+        return gru_out, probs  # Return hidden states and probabilities
+
+
+# Define directories
+input_dir = "path to frame_differences"   # Directory containing folders for each class (1 to 50)
+output_dir = "pah to gru_output"    # Directory where you want to save the selected features
+
+# Create output directory if it doesn't exist
+os.makedirs(output_dir, exist_ok=True)
+
+# Model parameters
+input_size = 1024  # Each frame difference feature has 1024 dimensions
+hidden_size = 1024 # Hidden size of GRU
+num_layers = 2  # Number of GRU layers
+
+# Initialize the GRU model
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+model = GRUModel(input_size=input_size, hidden_size=hidden_size, num_layers=num_layers).to(device)
+
+# Loop through each class (1 to 50 folders)
+for class_idx in range(1, 51):  # Assuming class directories are named 1 to 50
+    class_folder = os.path.join(input_dir, str(class_idx))  # Path to class folder
+    
+    # Step 1: Load 49 npy files for the current class
+    feature_list = []
+    for frame_idx in range(1, 50):  # 49 frame difference features for each class
+        npy_file = os.path.join(class_folder, f'{frame_idx}.npy')
+        
+        # Load the frame difference features (1024-dimensional vector)
+        frame_diff_features = np.load(npy_file)
+        
+        # Step 2: Apply absolute value
+        frame_diff_abs = np.abs(frame_diff_features)
+        
+        # Step 3: Normalize the features
+        scaler = StandardScaler()
+        normalized_features = scaler.fit_transform(frame_diff_abs.reshape(-1, 1)).flatten()
+        
+        feature_list.append(normalized_features)
+    
+    # Convert the list of features into a numpy array (shape: (49, 1024))
+    input_features = np.array(feature_list)
+
+    # Convert to PyTorch tensor and move to device (e.g., GPU)
+    input_tensor = torch.tensor(input_features, dtype=torch.float32).unsqueeze(0).to(device)  # Shape: (1, 49, 1024)
+
+    # Step 4: Pass the normalized features through the GRU
+    model.eval()  # Set model to evaluation mode
+    with torch.no_grad():
+        gru_out, probs = model(input_tensor)  # gru_out: (1, 49, hidden_size), probs: (1, 49, 1)
+
+    # Step 5: Select the top-k frames with the highest probabilities
+    top_k = 30  # Number of frames to select with highest probability
+    probs = probs.squeeze(0).squeeze(-1).cpu().numpy()  # Shape: (49,)
+    top_k_indices = np.argsort(probs)[-top_k:]  # Get indices of the top-k frames
+
+    # Step 6: Save the selected features for the top-k frames
+    selected_features = gru_out.squeeze(0)[top_k_indices].cpu().numpy()  # Shape: (top_k, hidden_size)
+    
+    # Create a separate folder for this class
+    class_output_folder = os.path.join(output_dir, f'{class_idx}')
+    os.makedirs(class_output_folder, exist_ok=True)
+    
+    # Save each selected feature and its index as an npy file
+    for idx, feature_idx in enumerate(top_k_indices):
+        selected_feature = selected_features[idx]
+        output_npy_path = os.path.join(class_output_folder, f'{idx + 1}.npy')
+        np.save(output_npy_path, selected_feature)
+
+print("Finished processing all classes.")

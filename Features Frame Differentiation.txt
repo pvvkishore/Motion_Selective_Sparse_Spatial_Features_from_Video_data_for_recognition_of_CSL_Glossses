@@ -1,0 +1,44 @@
+import os
+import numpy as np
+
+# Path where the folders (1 to 50) are stored with ResNet features
+resnet_features_base_path = "path to resnetfeatures"
+
+# Path where you want to save the frame differences
+frame_diff_base_path = "path to frame_differences"
+
+# Function to compute frame differencing for a given folder
+def compute_frame_differencing_for_folder(folder_num, folder_path):
+    # List all .npy files in the folder, sorted by frame number
+    npy_files = sorted([f for f in os.listdir(folder_path) if f.endswith('.npy')], 
+                       key=lambda x: int(x.split('.')[0]))  # Sort by frame number
+    
+    # Create a folder in the new base path to store the frame differences
+    diff_folder = os.path.join(frame_diff_base_path, str(folder_num))
+    if not os.path.exists(diff_folder):
+        os.makedirs(diff_folder)
+
+    # Iterate through consecutive frames and compute the difference
+    for i in range(1, len(npy_files)):
+        # Load the current frame and next frame
+        current_frame = np.load(os.path.join(folder_path, npy_files[i-1]))
+        next_frame = np.load(os.path.join(folder_path, npy_files[i]))
+        
+        # Compute the difference between consecutive frames
+        frame_diff = next_frame - current_frame
+        
+        # Save the frame difference as a new .npy file
+        diff_filename = f"{i}.npy"
+        np.save(os.path.join(diff_folder, diff_filename), frame_diff)
+
+# Iterate through all 50 folders
+for folder_num in range(1, 51):  # Folder names from 1 to 50
+    folder_path = os.path.join(resnet_features_base_path, str(folder_num))
+    
+    if os.path.exists(folder_path):
+        print(f"Processing folder {folder_num}...")
+        compute_frame_differencing_for_folder(folder_num, folder_path)
+    else:
+        print(f"Folder {folder_num} not found!")
+
+print("Frame differencing completed for all folders.")

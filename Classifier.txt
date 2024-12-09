@@ -1,0 +1,146 @@
+import os
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from sklearn.preprocessing import LabelEncoder
+from torch.utils.data import Dataset, DataLoader
+
+# Step 1: Load BiLSTM Features and Map Embeddings to Class Labels
+class BilstmDatasetWithClasses(Dataset):
+    def __init__(self, features_dir, embeddings_dir):
+        self.features_dir = features_dir
+        self.embeddings_dir = embeddings_dir
+        self.features_files = sorted([f for f in os.listdir(features_dir) if f.endswith('.npy')])
+        self.embeddings_files = sorted([f for f in os.listdir(embeddings_dir) if f.endswith('.npy')])
+        
+        assert len(self.features_files) == len(self.embeddings_files), \
+            "Number of features and embeddings must match!"
+        
+        # Load all embeddings and assign unique labels
+        embeddings = [np.load(os.path.join(embeddings_dir, f)) for f in self.embeddings_files]
+        self.label_encoder = LabelEncoder()
+        self.labels = self.label_encoder.fit_transform([str(e.tolist()) for e in embeddings])  # Convert embeddings to strings for encoding
+
+    def __len__(self):
+        return len(self.features_files)
+    
+    def __getitem__(self, idx):
+        # Load feature
+        feature_file = self.features_files[idx]
+        feature_path = os.path.join(self.features_dir, feature_file)
+        feature = np.load(feature_path)
+
+        # Get the corresponding label
+        label = self.labels[idx]
+        
+        # Convert to torch tensors
+        feature = torch.tensor(feature, dtype=torch.float32).squeeze()  # assuming shape (1, 1024)
+        label = torch.tensor(label, dtype=torch.long)
+        
+        return feature, label
+
+# Step 2: Define the Classifier Model
+class EmbeddingClassifier(nn.Module):
+    def __init__(self, input_size, num_classes):
+        super(EmbeddingClassifier, self).__init__()
+        self.fc1 = nn.Linear(input_size, 512)
+        self.relu = nn.ReLU()
+        self.fc2 = nn.Linear(512, num_classes)
+    
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.relu(x)
+        x = self.fc2(x)
+        return x
+
+# Step 3: Training Loop
+def train_model(model, dataloader, criterion, optimizer, num_epochs):
+    model.train()
+    
+    for epoch in range(num_epochs):
+        running_loss = 0.0
+        correct = 0
+        total = 0
+        
+        for features, labels in dataloader:
+            features, labels = features.to(device), labels.to(device)
+            
+            # Forward pass
+            outputs = model(features)
+            loss = criterion(outputs, labels)
+            
+            # Backward pass and optimization
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            
+            # Track loss and accuracy
+            running_loss += loss.item()
+            _, predicted = torch.max(outputs, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+        
+        # Print epoch statistics
+        epoch_loss = running_loss / len(dataloader)
+        epoch_acc = correct / total
+        print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {epoch_loss:.4f}, Accuracy: {epoch_acc:.4f}")
+
+# Step 4: Main Execution
+
+# Parameters
+input_size = 1024  # BiLSTM feature size
+num_epochs = 10
+batch_size = 16
+learning_rate = 0.001
+
+# Load Dataset
+features_dir = "path to bilstmfeatures"  # BiLSTM features folder
+embeddings_dir = "path to embeddings"  # Embedding vectors folder
+dataset = BilstmDatasetWithClasses(features_dir, embeddings_dir)
+dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
+# Get number of unique classes (embeddings)
+num_classes = len(dataset.label_encoder.classes_)
+
+# Initialize the model, loss function, and optimizer
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+model = EmbeddingClassifier(input_size, num_classes).to(device)
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+
+# Train the model
+train_model(model, dataloader, criterion, optimizer, num_epochs)
+
+# Step 5: Save the trained model
+torch.save(model.state_dict(), 'embedding_classifier_model.pth')
+print("Classifier model saved successfully!")
+
+import torch
+import torch.nn as nn
+from sklearn.preprocessing import LabelEncoder
+
+words = [words of the input frames]
+
+# Example of target sentences
+target_sentences = [
+    copy the target sentences here
+]
+
+# Flatten the target sentences into individual words
+target_words = [word for sentence in target_sentences for word in sentence.split()]
+
+# Combine predicted words and target words to fit the LabelEncoder
+combined_words = list(set(words + target_words))
+
+# Fit the LabelEncoder on the combined list of words
+label_encoder = LabelEncoder()
+label_encoder.fit(combined_words)
+
+# Now transform both predicted words and target words using the fitted encoder
+encoded_words = label_encoder.transform(words)
+encoded_targets = label_encoder.transform(target_words)
+
+# Check the encoded results
+print("Encoded words:", encoded_words)
+print("Encoded target words:", encoded_targets)

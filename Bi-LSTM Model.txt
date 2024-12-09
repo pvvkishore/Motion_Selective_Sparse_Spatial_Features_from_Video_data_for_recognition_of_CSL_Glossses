@@ -1,0 +1,186 @@
+import torch
+import torch.nn as nn
+import numpy as np
+import os
+
+# Define the BiLSTM model
+class BiLSTMModel(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size):
+        super(BiLSTMModel, self).__init__()
+        # BiLSTM layer (bidirectional LSTM)
+        self.bilstm = nn.LSTM(input_size, hidden_size, batch_first=True, bidirectional=True)
+        # Fully connected layer to map the BiLSTM output to the final output size
+        self.fc = nn.Linear(hidden_size * 2, output_size)  # *2 because it's bidirectional
+    
+    def forward(self, x):
+        # Forward pass through BiLSTM
+        lstm_out, _ = self.bilstm(x)  # lstm_out shape: [batch_size, seq_len, hidden_size*2]
+        
+        # Fully connected layer: we take the last time step's output
+        out = self.fc(lstm_out[:, -1, :])  # Use the last time step's output (final feature)
+        
+        return out
+
+# Function to load GRU output data from numpy files
+def load_gru_data(gru_data_dir, seq_len=30):
+    gru_tensor = []
+    for class_folder in sorted(os.listdir(gru_data_dir)):  # Sorting to maintain consistent order
+        class_folder_path = os.path.join(gru_data_dir, class_folder)
+        if os.path.isdir(class_folder_path):
+            class_frames = []
+            for file in sorted(os.listdir(class_folder_path)):  # Sorting files to maintain sequence order
+                if file.endswith('.npy'):
+                    file_path = os.path.join(class_folder_path, file)
+                    data = np.load(file_path)  # Shape: [seq_len, input_size]
+                    class_frames.append(data)
+            # After processing all files for a class, convert it to the correct shape
+            class_frames = np.array(class_frames)  # Shape: [seq_len, input_size]
+            gru_tensor.append(class_frames)
+    # Convert list to numpy array, then reshape it into [num_classes, seq_len, input_size]
+    gru_tensor = np.array(gru_tensor)  # Shape: [num_classes, seq_len, input_size]
+    return torch.tensor(gru_tensor, dtype=torch.float32)
+
+# Function to load embedding features as labels
+def load_embedding_labels(embedding_dir):
+    embeddings = []
+    for file in sorted(os.listdir(embedding_dir)):  # Sorting to maintain consistent order
+        if file.endswith('.npy'):
+            file_path = os.path.join(embedding_dir, file)
+            embedding = np.load(file_path)  # Shape: [embedding_dim]
+            embeddings.append(embedding)
+    return torch.tensor(embeddings, dtype=torch.float32)
+
+# Training the BiLSTM Model
+def train_bilstm_model(gru_tensor, label_tensor, input_size, hidden_size, output_size, num_epochs=50, learning_rate=0.001):
+    model = BiLSTMModel(input_size=input_size, hidden_size=hidden_size, output_size=output_size)
+    loss_fn = nn.MSELoss()  # Mean Squared Error Loss for regression
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    
+    for epoch in range(num_epochs):
+        model.train()  # Set the model to training mode
+        
+        # Zero the gradients
+        optimizer.zero_grad()
+        
+        # Forward pass
+        output = model(gru_tensor)  # Shape: [batch_size, output_size]
+        
+        # Calculate loss (MSE for regression task)
+        loss = loss_fn(output, label_tensor)
+        
+        # Backward pass and optimization
+        loss.backward()
+        optimizer.step()
+        
+        # Print loss every 10 epochs for monitoring
+        if (epoch + 1) % 10 == 0:
+            print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}')
+    
+    return model
+
+# Main function to run the entire training process
+def main():
+    # Paths to your dataset
+    gru_data_dir = "path to gru output files"   # Replace with the correct folder containing the GRU output npy files
+    embedding_dir = "path to embedding features"   # Replace with the correct folder path for embedding features
+    
+    # Load the GRU data
+    gru_tensor = load_gru_data(gru_data_dir)
+    print(f"GRU tensor shape: {gru_tensor.shape}")
+    
+    # Load the embedding features (target labels)
+    embedding_labels = load_embedding_labels(embedding_dir)
+    print(f"Embedding labels shape: {embedding_labels.shape}")
+    
+    # Model parameters
+    input_size = gru_tensor.shape[2]  # Number of features per time step (e.g., 1024)
+    hidden_size = 512  # Hidden size for BiLSTM (half the output size of bidirectional LSTM)
+    output_size = embedding_labels.shape[1]  # Embedding dimension (e.g., 768 or 1024)
+    
+    # Train the BiLSTM model
+    model = train_bilstm_model(gru_tensor, embedding_labels, input_size, hidden_size, output_size, num_epochs=50, learning_rate=0.001)
+    
+    # Optionally save the trained model
+    torch.save(model.state_dict(), 'bilstm_model.pth')
+    print("Model trained and saved as 'bilstm_model.pth'.")
+
+if __name__ == '__main__':
+    main()
+
+import torch
+import numpy as np
+import os
+
+# Define the BiLSTM model (same as in training)
+class BiLSTMModel(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size):
+        super(BiLSTMModel, self).__init__()
+        self.bilstm = nn.LSTM(input_size, hidden_size, batch_first=True, bidirectional=True)
+        self.fc = nn.Linear(hidden_size * 2, output_size)
+    
+    def forward(self, x):
+        lstm_out, _ = self.bilstm(x)
+        out = self.fc(lstm_out[:, -1, :])  # Use the last time step's output
+        return out
+
+# Function to load GRU output data from numpy files
+def load_gru_data(gru_data_dir, seq_len=30):
+    gru_tensor = []
+    file_names = []
+    for class_folder in sorted(os.listdir(gru_data_dir)):  # Sorting to maintain consistent order
+        class_folder_path = os.path.join(gru_data_dir, class_folder)
+        if os.path.isdir(class_folder_path):
+            class_frames = []
+            for file in sorted(os.listdir(class_folder_path)):  # Sorting files to maintain sequence order
+                if file.endswith('.npy'):
+                    file_path = os.path.join(class_folder_path, file)
+                    data = np.load(file_path)
+                    class_frames.append(data)
+                    file_names.append(file)  # Keep track of the file names
+            class_frames = np.array(class_frames)
+            gru_tensor.append(class_frames)
+    gru_tensor = np.array(gru_tensor)  # Shape: [num_classes, seq_len, input_size]
+    return torch.tensor(gru_tensor, dtype=torch.float32), file_names
+
+# Function to extract and save BiLSTM features
+def extract_bilstm_features(model, gru_tensor, output_dir, file_names):
+    model.eval()  # Set the model to evaluation mode
+    os.makedirs(output_dir, exist_ok=True)  # Create the output directory if it doesn't exist
+    
+    with torch.no_grad():  # No gradients needed for inference
+        for idx, gru_input in enumerate(gru_tensor):
+            gru_input = gru_input.unsqueeze(0)  # Add batch dimension (shape: [1, seq_len, input_size])
+            features = model(gru_input)  # Shape: [1, output_size]
+            features = features.squeeze(0).numpy()  # Remove batch dimension
+            
+            # Save features to output folder
+            output_file = os.path.join(output_dir, f"{file_names[idx]}")
+            np.save(output_file, features)
+            print(f"Saved features for {file_names[idx]} to {output_file}")
+
+# Main function for feature extraction
+def main():
+    # Paths to your dataset and output directory
+    gru_data_dir = "path to gru ouput"  # Replace with the folder containing GRU outputs
+    output_dir = "path to save bilstm_features"  # Folder to save extracted BiLSTM features
+    
+    # Load GRU data
+    gru_tensor, file_names = load_gru_data(gru_data_dir)
+    print(f"GRU tensor shape: {gru_tensor.shape}")
+    
+    # Model parameters
+    input_size = gru_tensor.shape[2]  # Number of features per time step (e.g., 1024)
+    hidden_size = 512  # Hidden size for BiLSTM
+    output_size = 1024  # Embedding feature size (adjust based on your target size)
+    
+    # Load the trained BiLSTM model
+    model = BiLSTMModel(input_size=input_size, hidden_size=hidden_size, output_size=output_size)
+    model.load_state_dict(torch.load('bilstm_model.pth'))
+    print("Loaded trained BiLSTM model.")
+    
+    # Extract and save features
+    extract_bilstm_features(model, gru_tensor, output_dir, file_names)
+    print(f"BiLSTM features saved to {output_dir}")
+
+if __name__ == '__main__':
+    main()
