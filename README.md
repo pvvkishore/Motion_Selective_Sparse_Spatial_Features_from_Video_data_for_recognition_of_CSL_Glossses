@@ -1,1 +1,1 @@
-# Motion_Selective_Sparse_Spatial_Features_from_Video_data_for_recognition_of_CSL_Glossses
+Title:  Motion Selective Sparse Spatial Features (MS3F) from Video Data for Recognition of Continuous Sign Language Glosses  
